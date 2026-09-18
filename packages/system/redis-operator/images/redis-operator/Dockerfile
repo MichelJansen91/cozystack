@@ -17,6 +17,17 @@ RUN rm -rf manifests charts example .github
 COPY patches /patches
 RUN git apply /patches/*.diff
 
+# go build never compiles a _test.go, so nothing else runs the tests of the
+# packages the patches touch. Each package is tested from its own directory:
+# that finds the module it belongs to, and an empty list runs nothing.
+RUN for dir in $(git apply --numstat /patches/*.diff | cut -f3 | grep '\.go$' | xargs -n1 dirname | sort -u); do \
+      (cd "$dir" && go test .) || exit 1; \
+    done
+
+# The integration tests the patches edit sit behind a build tag and need a
+# cluster, so they are only type-checked here.
+RUN go vet -tags integration ./test/integration/redisfailover
+
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH VERSION=$VERSION ./scripts/build.sh
 
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
