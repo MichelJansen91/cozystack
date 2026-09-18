@@ -14,6 +14,14 @@ COPY patches /patches
 RUN git apply /patches/*.diff
 COPY tests/kubevirt_migration_test.go.txt /source/pkg/controller/kubevirt_migration_test.go
 RUN go test ./pkg/controller -run '^TestVMIMigrationSchedulingRetry$' -count=1
+
+# go build never compiles a _test.go, so nothing else runs the tests of the
+# packages the patches touch. Each package is tested from its own directory:
+# that finds the module it belongs to, and an empty list runs nothing.
+RUN for dir in $(git apply --numstat /patches/*.diff | cut -f3 | grep '\.go$' | xargs -n1 dirname | sort -u); do \
+      (cd "$dir" && go test .) || exit 1; \
+    done
+
 # Upstream hardcodes GOARCH in each target: build-go is amd64 only, and
 # build-go-arm is its arm64 twin minus the `go mod tidy` and the test-server
 # binary, which this image never copies.
