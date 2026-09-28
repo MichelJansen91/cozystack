@@ -83,7 +83,9 @@ var guardConsumers = regexp.MustCompile(
 
 // sharedReadBy builds the read that fills one named local: a line-starting
 // assignment to that exact name, taking its value from a kubectl call that
-// passes the expansion of the shared name as its jsonpath.
+// passes the expansion of the shared name as its jsonpath. The call may go
+// through _cozy_guard_kubectl, the caller's bounded wrapper, which hands its
+// arguments to kubectl unchanged.
 //
 // The `$` is load-bearing rather than decorative. Matching the bare name would
 // accept `jsonpath=HELMRELEASE_HISTORY_JSONPATH`, which kubectl reads as a
@@ -126,7 +128,7 @@ var guardConsumers = regexp.MustCompile(
 // unterminated is how a later rewrite reopens the other one.
 func sharedReadBy(local string) *regexp.Regexp {
 	return regexp.MustCompile(`(?m)^[ \t]*` + regexp.QuoteMeta(local) +
-		`="?\$\(kubectl[^)]*jsonpath=[^)]*\$\{?` + sharedName + `\b`)
+		`="?\$\((?:_cozy_guard_)?kubectl[^)]*jsonpath=[^)]*\$\{?` + sharedName + `\b`)
 }
 
 // localFollowedByEquals counts occurrences of one named local followed by an
@@ -423,6 +425,7 @@ func TestGuardCallerReferencesTheSharedExpansion(t *testing.T) {
 				{"local renamed", "hr_history", `  hr_history=$(kubectl get hr -o"jsonpath=${HELMRELEASE_HISTORY_JSONPATH}")`},
 				{"spaced -o", "history_statuses", `  history_statuses=$(kubectl get hr -o jsonpath="${HELMRELEASE_HISTORY_JSONPATH}")`},
 				{"braceless expansion", "history_statuses", `  history_statuses=$(kubectl get hr -o"jsonpath=$HELMRELEASE_HISTORY_JSONPATH")`},
+				{"through the bounded wrapper, continued", "_history", "  _history=$(_cozy_guard_kubectl get hr -n \"$_ns\" \"${_hr}\" \\\n    -o\"jsonpath=${HELMRELEASE_HISTORY_JSONPATH}\") || _read_rc=$?"},
 			} {
 				t.Run(tc.spelling, func(t *testing.T) {
 					if !sharedReadBy(tc.local).MatchString(tc.line) {

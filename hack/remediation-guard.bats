@@ -80,3 +80,19 @@
         exit 1
     fi
 }
+
+@test "the predicate does not overwrite a caller variable named statuses" {
+    # This library is sourced rather than executed, and the helper assigns
+    # "statuses" internally, so without a local the argument lands in the
+    # caller's scope. The one caller using that name, the opensearch suite,
+    # passes that same variable in, so the overwrite was a no-op there: the
+    # scoping is hardening rather than a repair, and every other case here
+    # stays green with the local removed, so it needs a case of its own.
+    . hack/e2e-chainsaw/_lib/remediation-guard.sh
+    statuses=sentinel
+    helmrelease_has_remediation_cycle "failed"
+    if [ "${statuses}" != sentinel ]; then
+        echo "helmrelease_has_remediation_cycle replaced the caller's statuses with: ${statuses}" >&2
+        exit 1
+    fi
+}
