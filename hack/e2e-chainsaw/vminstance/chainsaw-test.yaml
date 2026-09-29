@@ -1,7 +1,8 @@
-# Chainsaw port of hack/e2e-apps/vminstance.bats. Two scenarios: a standalone
-# VMDisk, and a VMInstance booting from its own VMDisk. Both download the Ubuntu
-# noble cloud image, so the readiness timeouts are generous. Chainsaw deletes
-# the VMDisk/VMInstance CRs it applied at cleanup.
+# Chainsaw port of hack/e2e-apps/vminstance.bats. Three scenarios: a standalone
+# VMDisk, VMDisks cloned from a golden image and from another disk, and a
+# VMInstance booting from its own VMDisk. The first and last download the
+# Ubuntu noble cloud image, so the readiness timeouts are generous. Chainsaw
+# deletes the CRs it applied at cleanup.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -47,6 +48,118 @@ spec:
           kind: PersistentVolumeClaim
           metadata:
             name: vm-disk-test
+          status:
+            phase: Bound
+---
+# VMDisk clone paths: source.image clones a golden image from cozy-public, and
+# source.disk clones that disk in turn, so only the golden image downloads.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: vmdisk-clone
+spec:
+  catch:
+  - events: {}
+  - events:
+      namespace: cozy-public
+  - describe:
+      apiVersion: cdi.kubevirt.io/v1beta1
+      kind: DataVolume
+  - describe:
+      apiVersion: cdi.kubevirt.io/v1beta1
+      kind: DataVolume
+      namespace: cozy-public
+      name: vm-default-images-e2e-alpine-3.21
+  - describe:
+      apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+  steps:
+  - name: create-golden-image
+    try:
+    - apply:
+        file: golden-image.yaml
+    - assert:
+        timeout: 10m
+        resource:
+          apiVersion: cdi.kubevirt.io/v1beta1
+          kind: DataVolume
+          metadata:
+            name: vm-default-images-e2e-alpine-3.21
+            namespace: cozy-public
+          status:
+            phase: Succeeded
+  - name: clone-from-image
+    try:
+    - apply:
+        file: vmdisk-image-clone.yaml
+    - assert:
+        resource:
+          apiVersion: helm.toolkit.fluxcd.io/v2
+          kind: HelmRelease
+          metadata:
+            name: vm-disk-image-clone
+          status:
+            (conditions[?type == 'Ready']):
+            - status: "True"
+    # The vm-disk release goes Ready as soon as the DataVolume exists, so this
+    # assert is the one that waits for the clone itself.
+    - assert:
+        timeout: 10m
+        resource:
+          apiVersion: cdi.kubevirt.io/v1beta1
+          kind: DataVolume
+          metadata:
+            name: vm-disk-image-clone
+          spec:
+            source:
+              pvc:
+                name: vm-default-images-e2e-alpine-3.21
+                namespace: cozy-public
+          status:
+            phase: Succeeded
+    - assert:
+        timeout: 2m
+        resource:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: vm-disk-image-clone
+          status:
+            phase: Bound
+  - name: clone-from-disk
+    try:
+    - apply:
+        file: vmdisk-disk-clone.yaml
+    - assert:
+        resource:
+          apiVersion: helm.toolkit.fluxcd.io/v2
+          kind: HelmRelease
+          metadata:
+            name: vm-disk-disk-clone
+          status:
+            (conditions[?type == 'Ready']):
+            - status: "True"
+    - assert:
+        timeout: 10m
+        resource:
+          apiVersion: cdi.kubevirt.io/v1beta1
+          kind: DataVolume
+          metadata:
+            name: vm-disk-disk-clone
+          spec:
+            source:
+              pvc:
+                name: vm-disk-image-clone
+                namespace: ($namespace)
+          status:
+            phase: Succeeded
+    - assert:
+        timeout: 2m
+        resource:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: vm-disk-disk-clone
           status:
             phase: Bound
 ---
