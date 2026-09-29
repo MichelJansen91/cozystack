@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -89,7 +90,7 @@ func (w *WrappedNodeService) NodePublishVolume(ctx context.Context, req *csi.Nod
 		return nil, status.Errorf(codes.Internal, "NFS temp mount failed: %v", err)
 	}
 	defer func() {
-		if err := w.mounter.Unmount(tmpMount); err != nil {
+		if err := unmountTempMount(w.mounter, tmpMount); err != nil {
 			klog.Warningf("Failed to unmount temp dir %s: %v", tmpMount, err)
 		}
 	}()
@@ -132,6 +133,26 @@ func (w *WrappedNodeService) NodePublishVolume(ctx context.Context, req *csi.Nod
 	}
 
 	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+const (
+	// csiTimeout in kubernetes pkg/volume/csi/csi_plugin.go: the deadline
+	// kubelet puts on NodePublishVolume.
+	kubeletCSIOperationTimeout = 2 * time.Minute
+	// Leaves room inside kubeletCSIOperationTimeout for the mounts and the
+	// migration that precede the unmount.
+	tempUnmountTimeout = 30 * time.Second
+)
+
+// unmountTempMount bounds the unmount where the mounter can: a plain umount
+// of an NFS mount whose server is gone blocks forever, which hangs the publish
+// and leaks the mount. UnmountWithForce retries with -f once the timeout
+// passes.
+func unmountTempMount(m mount.Interface, dir string) error {
+	if fm, ok := m.(mount.MounterForceUnmounter); ok {
+		return fm.UnmountWithForce(dir, tempUnmountTimeout)
+	}
+	return m.Unmount(dir)
 }
 
 // NodeExpandVolume for NFS volumes is a no-op (LINSTOR handles NFS resize automatically).
