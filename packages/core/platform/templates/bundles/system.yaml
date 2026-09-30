@@ -1,3 +1,20 @@
+{{- /* networkingVariant is an isp-full-only selector, but the packages it
+       gates render on every bundle variant. Accepted elsewhere it would
+       half-apply: drop kube-ovn-webhook/-plunger, securitygroup-controller,
+       the VPC app and the sdn APIService while the real CNI keeps running.
+       Refuse the render outright instead — and validated here, outside the
+       enabled/variant branches, so no combination of bundle values slips a
+       half-applied variant through. */ -}}
+{{- $nv := .Values.bundles.system.networkingVariant | default "kubeovn-cilium" -}}
+{{- if and (ne $nv "kubeovn-cilium") (ne .Values.bundles.system.variant "isp-full") -}}
+{{- fail (printf "bundles.system.networkingVariant %q is only supported on the isp-full bundle variant, got %q" $nv .Values.bundles.system.variant) -}}
+{{- end -}}
+{{- /* The default gateway.className is the Cilium class, and no Cilium runs on
+       the cozyplane variant — every tenant Gateway would sit unserved with
+       nothing reporting why. */ -}}
+{{- if and (eq $nv "cozyplane") .Values.gateway.enabled (eq .Values.gateway.className "cilium") -}}
+{{- fail "gateway.enabled needs a gateway.className another implementation serves on the cozyplane networking variant: nothing serves the \"cilium\" class there" -}}
+{{- end -}}
 {{- if .Values.bundles.system.enabled }}
 
 # Networking
