@@ -10,3 +10,4 @@ include ../../../hack/package.mk
 
 test:
 	helm lint .
+	helm unittest .
