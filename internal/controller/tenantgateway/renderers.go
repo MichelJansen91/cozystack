@@ -403,6 +403,9 @@ type passthroughListener struct {
 	// section is the rendered Gateway listener name, which is also the
 	// sectionName a route pins itself to.
 	section string
+	// gateway is the Gateway the listener renders on, which a route
+	// has to name in its parentRef to reach it.
+	gateway string
 	// hostname is the SNI the listener answers.
 	hostname string
 	// port is the Gateway port the listener is published on: 443 for a
@@ -439,6 +442,7 @@ func passthroughListeners(tgw *gatewayv1alpha1.TenantGateway) []passthroughListe
 	for _, svc := range services {
 		out = append(out, passthroughListener{
 			section:  passthroughListenerPrefix + svc,
+			gateway:  passthroughGatewayName(tgw),
 			hostname: svc + "." + tgw.Spec.Apex,
 			port:     443,
 		})
@@ -446,6 +450,7 @@ func passthroughListeners(tgw *gatewayv1alpha1.TenantGateway) []passthroughListe
 	for _, pl := range tgw.Spec.TLSPassthroughListeners {
 		out = append(out, passthroughListener{
 			section:    passthroughListenerPrefix + pl.Name,
+			gateway:    tgw.Name,
 			hostname:   pl.Hostname,
 			port:       pl.Port,
 			tenantOnly: true,
