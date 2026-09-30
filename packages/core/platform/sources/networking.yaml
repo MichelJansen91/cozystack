@@ -150,10 +150,11 @@ spec:
   # clusters — NO Cilium and NO kube-proxy. cozyplane owns the datapath and the
   # CNI conflist; cozyplane-kpr provides in-cluster Services via socket-LB
   # (importing Cilium's LB control plane, no Cilium agent). See
-  # docs/kube-proxy-replacement.md.
-  # NOTE: host-firewall and default-network NetworkPolicy that Cilium provided
-  # are not yet replaced, and external NodePort + VM-guest ClusterIP do not
-  # work yet (follow-ups).
+  # docs/kube-proxy-replacement.md in the cozyplane repository.
+  # NOTE: the CiliumNetworkPolicy objects stock charts ship apply but are not
+  # enforced on this variant. Tenant isolation on the default network is a
+  # follow-up, to be rebuilt on what cozyplane does enforce there: native
+  # NetworkPolicy and its operator-only HostFirewall.
   - name: cozyplane
     dependsOn:
     - cozystack.gateway-api-crds

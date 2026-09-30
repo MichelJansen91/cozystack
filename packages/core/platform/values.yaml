@@ -42,6 +42,12 @@ bundles:
     #   "kubeovn-cilium" — KubeOVN fabric + Cilium (default)
     #   "cozyplane"      — cozyplane eBPF CNI + cozyplane-kpr socket-LB KPR
     #                      (no Cilium, no kube-proxy)
+    # On "cozyplane", CiliumNetworkPolicy objects apply but are NOT ENFORCED
+    # (the CRDs ship inert so stock charts install): tenant network isolation
+    # on the default network and the Cilium host firewall are not in effect.
+    # cozystack-api's SecurityGroup — a restricted interface over
+    # CiliumNetworkPolicy — is not served either; cozyplane's own SecurityGroup
+    # polices traffic inside and across VPCs instead.
     networkingVariant: "kubeovn-cilium"
   iaas:
     enabled: false
