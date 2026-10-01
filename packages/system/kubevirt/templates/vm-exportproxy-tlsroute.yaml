@@ -2,7 +2,8 @@
 {{- $exposeServices := splitList "," ((index .Values._cluster "expose-services") | default "") }}
 {{- $exposeIngress := (index .Values._cluster "expose-ingress") | default "tenant-root" }}
 {{- $gatewayEnabled := (index .Values._cluster "gateway-enabled") | default "false" }}
-{{- if and (has "vm-exportproxy" $exposeServices) (eq $gatewayEnabled "true") }}
+{{- $passthroughMode := (index .Values._cluster "gateway-passthrough-mode") | default "singleAddress" }}
+{{- if and (has "vm-exportproxy" $exposeServices) (eq $gatewayEnabled "true") (eq $passthroughMode "separateAddress") }}
 apiVersion: gateway.networking.k8s.io/v1alpha2
 kind: TLSRoute
 metadata:

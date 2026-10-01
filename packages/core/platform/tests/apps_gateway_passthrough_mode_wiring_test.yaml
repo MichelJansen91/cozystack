@@ -1,0 +1,35 @@
+suite: apps.yaml gateway.passthroughMode → _cluster wiring
+templates:
+  - templates/apps.yaml
+
+release:
+  name: cozy-platform
+  namespace: cozy-system
+
+# The gateway chart and the three system charts whose routes carry the
+# TLS-passthrough services all read the mode from this one key, so they
+# cannot disagree about where those services are published.
+
+tests:
+  - it: defaults to singleAddress
+    asserts:
+      - matchRegex:
+          path: stringData["values.yaml"]
+          pattern: '(?m)^\s*gateway-passthrough-mode:\s*"singleAddress"'
+
+  - it: writes separateAddress when chosen
+    set:
+      gateway:
+        passthroughMode: separateAddress
+    asserts:
+      - matchRegex:
+          path: stringData["values.yaml"]
+          pattern: '(?m)^\s*gateway-passthrough-mode:\s*"separateAddress"'
+
+  - it: refuses any other mode
+    set:
+      gateway:
+        passthroughMode: sameAddress
+    asserts:
+      - failedTemplate:
+          errorPattern: "gateway.passthroughMode must be singleAddress or separateAddress"

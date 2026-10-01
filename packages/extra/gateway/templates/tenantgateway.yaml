@@ -190,12 +190,38 @@ spec:
     - {{ . | quote }}
     {{- end }}
   {{- end }}
-  {{- /* Not written at all in edge mode: the controller renders no TLS
-         listener for these, so an object advertising them would send an
-         operator looking for endpoints that are not published. */}}
-  {{- with (ternary (list) .Values.tlsPassthroughServices (eq $tlsTermination "edge")) }}
+  {{- /* The passthrough services are platform routes attached to the
+         publishing tenant's Gateway, so any other tenant rendering them
+         would reserve names and, under separateAddress, an address for
+         routes that never come. None in edge mode: the controller renders
+         no TLS listener there. */}}
+  {{- $passthroughMode := (index .Values._cluster "gateway-passthrough-mode") | default "singleAddress" }}
+  {{- if not (has $passthroughMode (list "singleAddress" "separateAddress")) }}
+    {{- fail (printf "packages/extra/gateway: unsupported _cluster.gateway-passthrough-mode=%q. Supported values: singleAddress, separateAddress." $passthroughMode) }}
+  {{- end }}
+  {{- $exposed := splitList "," ((index .Values._cluster "expose-services") | default "") }}
+  {{- $passthrough := list }}
+  {{- if and (ne $tlsTermination "edge") (eq .Release.Namespace ((index .Values._cluster "expose-ingress") | default "tenant-root")) }}
+    {{- range .Values.tlsPassthroughServices }}
+      {{- if has . $exposed }}
+        {{- $passthrough = append $passthrough . }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- if eq $passthroughMode "separateAddress" }}
+  {{- with $passthrough }}
   tlsPassthroughServices:
     {{- range . }}
     - {{ . | quote }}
     {{- end }}
+  {{- end }}
+  {{- else if has "api" $passthrough }}
+  {{- /* The other two are terminated on 443 by HTTPRoutes their own
+         charts render; the API is passed through, so its client
+         certificates reach kube-apiserver, on the port it is served on
+         elsewhere. */}}
+  tlsPassthroughListeners:
+    - name: api
+      port: 6443
+      hostname: {{ printf "api.%s" $host | quote }}
   {{- end }}

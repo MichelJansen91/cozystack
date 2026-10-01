@@ -182,6 +182,11 @@ stringData:
       proxy-protocol: {{ .Values.publishing.proxyProtocol | default false | quote }}
       gateway-enabled: {{ .Values.gateway.enabled | default false | quote }}
       gateway-attached-namespaces: {{ .Values.gateway.attachedNamespaces | default (list) | join "," | quote }}
+      {{- $passthroughMode := .Values.gateway.passthroughMode | default "singleAddress" }}
+      {{- if not (has $passthroughMode (list "singleAddress" "separateAddress")) }}
+      {{- fail (printf "gateway.passthroughMode must be singleAddress or separateAddress, got %v" $passthroughMode) }}
+      {{- end }}
+      gateway-passthrough-mode: {{ $passthroughMode | quote }}
       {{- /* Normalised once here rather than at each reader: two charts
              compare this scalar against the comma-joined lists below,
              which trim their own entries on split, so a padded name that

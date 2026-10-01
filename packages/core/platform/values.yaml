@@ -537,12 +537,10 @@ gateway:
   #     keycloak, harbor, bucket, grafana) render an HTTPRoute attached to
   #     the tenant's Gateway.
   #   - The three that present a certificate of their own (api,
-  #     vm-exportproxy, cdi-uploadproxy) render a TLSRoute instead, pinned
-  #     by sectionName to the tls-<name> TLS-passthrough listener the
-  #     per-tenant gateway chart declares for it. The cozystack-api,
-  #     kubevirt and kubevirt-cdi packages ship one each, cluster-wide,
-  #     attached to the Gateway in the namespace publishing.ingressName
-  #     selects.
+  #     vm-exportproxy, cdi-uploadproxy) are published as passthroughMode
+  #     below says, by routes the cozystack-api, kubevirt and kubevirt-cdi
+  #     packages ship, attached to the Gateway in the namespace
+  #     publishing.ingressName selects.
   # Per-tenant opt-in is still governed by tenant.spec.gateway=true, which
   # materialises the Gateway itself. This flag only controls platform-wide
   # Gateway API integration (cert-manager solver + the per-service routes).
@@ -592,6 +590,22 @@ gateway:
   # class here when moving the default. Reaches the per-tenant gateway
   # chart as _cluster.gateway-tenant-classes.
   tenantSelectableClasses: []
+  # How the three exposed services that present a certificate of their
+  # own (api, vm-exportproxy, cdi-uploadproxy) reach the publishing
+  # tenant's Gateway. Gateway API lets an implementation refuse TLS
+  # passthrough next to HTTPS termination on one port of one address, so
+  # they cannot be passed through on 443 beside the tenant's HTTPS
+  # listeners.
+  #   singleAddress: no second address. The Kubernetes API is passed
+  #     through on port 6443, so publishing.apiServerEndpoint has to name
+  #     that port. The VM export and CDI upload proxies are terminated on
+  #     443 and re-encrypted to the backend under a BackendTLSPolicy,
+  #     which the GatewayClass has to support.
+  #   separateAddress: all three are passed through on 443 of a second
+  #     Gateway with an address of its own; their DNS records have to
+  #     point at that address.
+  # Reaches charts as _cluster.gateway-passthrough-mode.
+  passthroughMode: singleAddress
   # Advertise HTTP/2 on every Gateway API listener served by the bundled
   # Cilium dataplane. Browsers negotiate HTTP/2 exclusively through TLS ALPN
   # "h2"; with this off, Envoy advertises no ALPN protocols and every client

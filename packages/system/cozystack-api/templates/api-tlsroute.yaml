@@ -2,7 +2,9 @@
 {{- $exposeServices := splitList "," ((index .Values._cluster "expose-services") | default "") }}
 {{- $exposeIngress := (index .Values._cluster "expose-ingress") | default "tenant-root" }}
 {{- $gatewayEnabled := (index .Values._cluster "gateway-enabled") | default "false" }}
+{{- $passthroughMode := (index .Values._cluster "gateway-passthrough-mode") | default "singleAddress" }}
 {{- if and (has "api" $exposeServices) (eq $gatewayEnabled "true") }}
+{{- if eq $passthroughMode "separateAddress" }}
 apiVersion: gateway.networking.k8s.io/v1alpha2
 kind: TLSRoute
 metadata:
@@ -21,4 +23,43 @@ spec:
   - backendRefs:
     - name: kubernetes
       port: 443
+{{- else }}
+{{- /* The native-port listener admits routes from the publishing
+       tenant's namespace alone, so the route lives there and reaches
+       the kubernetes Service in default through a ReferenceGrant. */}}
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: kubernetes-api
+  namespace: {{ $exposeIngress }}
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: cozystack
+    namespace: {{ $exposeIngress }}
+    sectionName: tls-api
+  hostnames:
+  - {{ printf "api.%s" $host | quote }}
+  rules:
+  - backendRefs:
+    - name: kubernetes
+      namespace: default
+      port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: kubernetes-api-tlsroute
+  namespace: default
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: TLSRoute
+    namespace: {{ $exposeIngress }}
+  to:
+  - group: ""
+    kind: Service
+    name: kubernetes
+{{- end }}
 {{- end }}

@@ -36,13 +36,17 @@ tests:
         hasDocuments:
           count: 0
 
-  - it: gateway-enabled=true renders TLSRoute only
+  - it: separateAddress passes the API through the passthrough Gateway
     set:
       _cluster:
         root-host: example.org
         expose-services: "api"
         gateway-enabled: "true"
+        gateway-passthrough-mode: separateAddress
     asserts:
+      - template: templates/api-tlsroute.yaml
+        hasDocuments:
+          count: 1
       - template: templates/api-tlsroute.yaml
         equal:
           path: kind
@@ -73,6 +77,67 @@ tests:
         hasDocuments:
           count: 0
 
+  # The native-port listener on the main Gateway admits routes from the
+  # publishing tenant's namespace alone, so the route lives there and a
+  # ReferenceGrant lets it reach the kubernetes Service in default.
+  - it: singleAddress passes the API through tls-api on the main Gateway
+    set:
+      _cluster:
+        root-host: example.org
+        expose-services: "api"
+        expose-ingress: tenant-root
+        gateway-enabled: "true"
+    asserts:
+      - template: templates/api-tlsroute.yaml
+        hasDocuments:
+          count: 2
+      - template: templates/api-tlsroute.yaml
+        documentIndex: 0
+        equal:
+          path: metadata.namespace
+          value: tenant-root
+      - template: templates/api-tlsroute.yaml
+        documentIndex: 0
+        equal:
+          path: spec.parentRefs[0]
+          value:
+            group: gateway.networking.k8s.io
+            kind: Gateway
+            name: cozystack
+            namespace: tenant-root
+            sectionName: tls-api
+      - template: templates/api-tlsroute.yaml
+        documentIndex: 0
+        equal:
+          path: spec.rules[0].backendRefs[0]
+          value:
+            name: kubernetes
+            namespace: default
+            port: 443
+      - template: templates/api-tlsroute.yaml
+        documentIndex: 1
+        equal:
+          path: kind
+          value: ReferenceGrant
+      - template: templates/api-tlsroute.yaml
+        documentIndex: 1
+        equal:
+          path: metadata.namespace
+          value: default
+      - template: templates/api-tlsroute.yaml
+        documentIndex: 1
+        equal:
+          path: spec
+          value:
+            from:
+              - group: gateway.networking.k8s.io
+                kind: TLSRoute
+                namespace: tenant-root
+            to:
+              - group: ""
+                kind: Service
+                name: kubernetes
+
   - it: api not in expose-services renders neither template
     set:
       _cluster:
@@ -96,6 +161,7 @@ tests:
         gateway-enabled: "true"
     asserts:
       - template: templates/api-tlsroute.yaml
+        documentIndex: 0
         equal:
           path: spec.parentRefs[0].namespace
           value: tenant-foo

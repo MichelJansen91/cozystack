@@ -1,0 +1,114 @@
+suite: platform TLS-passthrough services by _cluster.gateway-passthrough-mode
+templates:
+  - templates/tenantgateway.yaml
+
+release:
+  name: gateway
+  namespace: tenant-root
+
+# The TLS-passthrough services are platform routes attached to the
+# publishing tenant's Gateway, so only that tenant renders anything for
+# them, and only for what the platform exposes. The mode decides where:
+# separateAddress puts all of them on port 443 of the controller's second
+# Gateway, singleAddress passes the Kubernetes API through on 6443 of the
+# main one and leaves the other two to HTTPRoutes their own charts render.
+
+tests:
+  - it: separateAddress publishes every exposed passthrough service on 443
+    set:
+      _cluster: &publishing
+        solver: http01
+        expose-ingress: tenant-root
+        issuer-name: letsencrypt-prod
+        expose-services: "api,dashboard,vm-exportproxy,cdi-uploadproxy"
+        gateway-passthrough-mode: separateAddress
+      _namespace:
+        host: example.org
+    asserts:
+      - equal:
+          path: spec.tlsPassthroughServices
+          value: [api, vm-exportproxy, cdi-uploadproxy]
+      - notExists:
+          path: spec.tlsPassthroughListeners
+
+  - it: separateAddress leaves out a service the platform does not expose
+    set:
+      _cluster:
+        <<: *publishing
+        expose-services: "api,dashboard"
+      _namespace:
+        host: example.org
+    asserts:
+      - equal:
+          path: spec.tlsPassthroughServices
+          value: [api]
+
+  - it: singleAddress passes the Kubernetes API through on 6443 and nothing on 443
+    set:
+      _cluster:
+        <<: *publishing
+        gateway-passthrough-mode: singleAddress
+      _namespace:
+        host: example.org
+    asserts:
+      - notExists:
+          path: spec.tlsPassthroughServices
+      - equal:
+          path: spec.tlsPassthroughListeners
+          value:
+            - name: api
+              port: 6443
+              hostname: api.example.org
+
+  - it: singleAddress is the default
+    set:
+      _cluster:
+        solver: http01
+        expose-ingress: tenant-root
+        issuer-name: letsencrypt-prod
+        expose-services: "api"
+      _namespace:
+        host: example.org
+    asserts:
+      - notExists:
+          path: spec.tlsPassthroughServices
+      - equal:
+          path: spec.tlsPassthroughListeners[0].port
+          value: 6443
+
+  - it: singleAddress renders no listener when the API is not exposed
+    set:
+      _cluster:
+        <<: *publishing
+        expose-services: "dashboard,vm-exportproxy"
+        gateway-passthrough-mode: singleAddress
+      _namespace:
+        host: example.org
+    asserts:
+      - notExists:
+          path: spec.tlsPassthroughListeners
+
+  - it: a tenant that does not publish the platform renders none of them
+    release:
+      namespace: tenant-alice
+    set:
+      _cluster:
+        <<: *publishing
+      _namespace:
+        host: alice.example.org
+    asserts:
+      - notExists:
+          path: spec.tlsPassthroughServices
+      - notExists:
+          path: spec.tlsPassthroughListeners
+
+  - it: an unknown mode is refused
+    set:
+      _cluster:
+        <<: *publishing
+        gateway-passthrough-mode: sameAddress
+      _namespace:
+        host: example.org
+    asserts:
+      - failedTemplate:
+          errorPattern: "gateway-passthrough-mode"
