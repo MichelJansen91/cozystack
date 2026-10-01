@@ -977,16 +977,26 @@ spec:
   steps:
   - name: parent-child-and-route-drive-listener-set
     try:
+    # Above the 660s of polls plus the 420s the trap's deletes may wait, so a
+    # poll or a delete is what fires and the trap still runs: a kill at the op
+    # ceiling would skip cleanup and leave both tenants behind for every later
+    # suite. hack/chainsaw-op-budgets.bats holds the op to that sum.
     - script:
-        timeout: 6m
+        timeout: 19m
         content: |
           set -eu
           ns="$NAMESPACE"
 
+          # Each delete waits, child before parent, because a parent deleted
+          # while its child is still uninstalling wedges the parent's cleanup.
+          # Each wait is bounded, because the trap runs inside the op ceiling,
+          # so a child still uninstalling at its bound leaves the parent in
+          # place: a leaked tenant rather than a wedged one.
           cleanup() {
-            kubectl -n tenant-test-rparent-rchild delete httproute inherit-probe --ignore-not-found >/dev/null 2>&1 || true
-            kubectl -n tenant-test-rparent delete tenant rchild --ignore-not-found >/dev/null 2>&1 || true
-            kubectl -n "$ns" delete tenant rparent --ignore-not-found >/dev/null 2>&1 || true
+            kubectl -n tenant-test-rparent-rchild delete httproute inherit-probe --ignore-not-found --timeout=60s >/dev/null 2>&1 || true
+            if kubectl -n tenant-test-rparent delete tenant rchild --ignore-not-found --timeout=180s >/dev/null 2>&1; then
+              kubectl -n "$ns" delete tenant rparent --ignore-not-found --timeout=180s >/dev/null 2>&1 || true
+            fi
           }
           trap cleanup EXIT
 
