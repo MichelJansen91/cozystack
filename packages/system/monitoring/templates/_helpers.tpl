@@ -302,6 +302,72 @@
 {{- index .Values "_tracingCentralPassword" -}}
 {{- end -}}
 
+{{- /*
+  Bytes in a Kubernetes quantity (10Gi, 1.5Gi, 500M), as a float. Only the
+  plain forms the storage field is written in are accepted; anything else fails
+  the render rather than sizing the tenant rate on a guess.
+*/ -}}
+{{- define "monitoring.quantityBytes" -}}
+{{- $units := dict "" 1.0 "k" 1e3 "M" 1e6 "G" 1e9 "T" 1e12 "P" 1e15 "Ki" 1024.0 "Mi" 1048576.0 "Gi" 1073741824.0 "Ti" 1099511627776.0 "Pi" 1125899906842624.0 -}}
+{{- $q := toString . -}}
+{{- $m := regexFind "^[0-9]+(\\.[0-9]+)?" $q -}}
+{{- $unit := trimPrefix $m $q -}}
+{{- if or (not $m) (not (hasKey $units $unit)) -}}
+{{-   fail (printf "monitoring: cannot read %q as a volume size to derive the shared-central tenant rate from; write it as a number with an optional k/M/G/T/P or Ki/Mi/Gi/Ti/Pi suffix, or set tracingCentralTenantBytesPerSecond." $q) -}}
+{{- end -}}
+{{- mulf (float64 $m) (get $units $unit) -}}
+{{- end -}}
+
+{{- /* Bytes in a VictoriaMetrics BytesString (8GB, 8GiB), as a float. The
+       format is validated with the tracingStorages entry. */ -}}
+{{- define "monitoring.bytesStringBytes" -}}
+{{- $units := dict "" 1.0 "kb" 1e3 "mb" 1e6 "gb" 1e9 "tb" 1e12 "KB" 1e3 "MB" 1e6 "GB" 1e9 "TB" 1e12 "KiB" 1024.0 "MiB" 1048576.0 "GiB" 1073741824.0 "TiB" 1099511627776.0 -}}
+{{- $s := toString . -}}
+{{- $m := regexFind "^[0-9]+" $s -}}
+{{- mulf (float64 $m) (get $units (trimPrefix $m $s)) -}}
+{{- end -}}
+
+{{- /*
+  The rate, in bytes per second, at which one tenant alone would fill the
+  shared store's disk cap within the two days VictoriaTraces always keeps,
+  from a per-vtstorage-replica cap in bytes. Spans are counted uncompressed
+  by the limiter and stored compressed, so the bound errs low.
+*/ -}}
+{{- define "monitoring.tracingCentralRateFromCap" -}}
+{{- printf "%.0f" (floor (divf (mulf 2 .) 172800)) -}}
+{{- end -}}
+
+{{- /* The rate a central tenant's collector falls back to when tenant-root
+       publishes none: that of a default 10Gi store without a byte cap. */ -}}
+{{- define "monitoring.tracingCentralDefaultTenantRate" -}}
+{{- include "monitoring.tracingCentralRateFromCap" (mulf 0.8 (include "monitoring.quantityBytes" "10Gi")) -}}
+{{- end -}}
+
+{{- /*
+  The rate each central tenant may write to the shared store, which tenant-root
+  publishes on its vmauth: tracingCentralTenantBytesPerSecond when set, else
+  derived from the generic store's byte cap or, without one, the 80% of its
+  volume the store is bounded at.
+*/ -}}
+{{- define "monitoring.tracingCentralTenantRate" -}}
+{{- $explicit := int64 (.Values.tracingCentralTenantBytesPerSecond | default 0) -}}
+{{- if gt $explicit 0 -}}
+{{-   $explicit -}}
+{{- else -}}
+{{-   range .Values.tracingStorages -}}
+{{-     if eq .name "generic" -}}
+{{-       $cap := 0.0 -}}
+{{-       if .retentionDiskUsageBytes -}}
+{{-         $cap = include "monitoring.bytesStringBytes" .retentionDiskUsageBytes | float64 -}}
+{{-       else -}}
+{{-         $cap = mulf 0.8 (include "monitoring.quantityBytes" .storage) -}}
+{{-       end -}}
+{{-       include "monitoring.tracingCentralRateFromCap" $cap -}}
+{{-     end -}}
+{{-   end -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* tenant-root hosts the shared store only when it opts in with
        tracingCentralHost, since the store is also its own, and lists a
        cluster-mode entry named generic, the store every central VMUser routes

@@ -53,6 +53,7 @@ logsStorages:
 
 tracingStorages: []
 tracingCentralHost: false
+tracingCentralTenantBytesPerSecond: 0
 
 tracingCollector:
   enabled: true

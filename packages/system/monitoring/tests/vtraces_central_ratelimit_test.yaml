@@ -1,0 +1,314 @@
+suite: shared-central tracing holds each tenant to a write rate
+# A store sharing one disk among tenants is protected by its disk cap only as
+# long as no tenant writes faster than the cap can absorb: VictoriaTraces always
+# keeps the last two days, so a tenant that fills the cap within two days fills
+# the disk for all of them. tenant-root publishes the rate each tenant may write
+# on its vmauth, and each central tenant's collector enforces it.
+#
+# Expected rates: floor(2 vtstorage replicas * per-replica cap / 172800 s), the
+# per-replica cap being retentionDiskUsageBytes or 80% of the volume.
+templates:
+  - templates/vtraces/vmauth.yaml
+  - templates/vtraces/collector.yaml
+
+release:
+  name: monitoring
+  namespace: tenant-root
+
+tests:
+  - it: derives the tenant rate from 80% of the volume without a byte cap
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: 10Gi
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "99420"
+
+  - it: derives the tenant rate from a decimal binary volume size
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: 1.5Gi
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "14913"
+
+  - it: derives the tenant rate from a decimal-unit volume size
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: 500M
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "4629"
+
+  - it: derives the tenant rate from a large volume without overflowing
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: 1Ti
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "10180663"
+
+  - it: derives the tenant rate from a byte cap in decimal units
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: 10Gi
+          retentionDiskUsageBytes: "8GB"
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "92592"
+
+  - it: derives the tenant rate from a byte cap in binary units
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: 10Gi
+          retentionDiskUsageBytes: "4GiB"
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "49710"
+
+  - it: derives the tenant rate from the generic store alone
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingCollector:
+        enabled: false
+      tracingStorages:
+        - name: audit
+          mode: single
+          storage: 1Gi
+        - name: generic
+          mode: cluster
+          storage: 10Gi
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "99420"
+
+  - it: refuses a volume size it cannot read rather than guess the rate
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: "1e10"
+    asserts:
+      - failedTemplate:
+          errorMessage: 'monitoring: cannot read "1e10" as a volume size to derive the shared-central tenant rate from; write it as a number with an optional k/M/G/T/P or Ki/Mi/Gi/Ti/Pi suffix, or set tracingCentralTenantBytesPerSecond.'
+
+  - it: reads no volume size when the tenant rate is explicit
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingCentralTenantBytesPerSecond: 500000
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: "1e10"
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "500000"
+
+  - it: takes an explicit tenant rate over the derived one
+    template: templates/vtraces/vmauth.yaml
+    set:
+      tracingCentralHost: true
+      tracingCentralTenantBytesPerSecond: 500000
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: 10Gi
+    asserts:
+      - equal:
+          path: metadata.annotations["tracing.cozystack.io/tenant-bytes-per-second"]
+          value: "500000"
+
+  - it: limits a central tenant's collector to the rate tenant-root publishes
+    template: templates/vtraces/collector.yaml
+    release:
+      namespace: tenant-foo
+    set:
+      _namespace:
+        tracingCentral: true
+      tracingCollector:
+        replicas: 1
+    kubernetesProvider:
+      scheme: &scheme
+        "operator.victoriametrics.com/v1beta1/VMAuth":
+          gvr:
+            group: "operator.victoriametrics.com"
+            version: "v1beta1"
+            resource: "vmauths"
+          namespaced: true
+      objects:
+        - kind: VMAuth
+          apiVersion: operator.victoriametrics.com/v1beta1
+          metadata:
+            name: traces-central
+            namespace: tenant-root
+            annotations:
+              tracing.cozystack.io/tenant-bytes-per-second: "100000"
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "(?m)^  ratelimit/tenant:\\n    strategy: bytes\\n    rate: 100000\\n    burst: 67108864\\n    throttle_behavior: error$"
+      # Before batch: the batch processor sends asynchronously, so a refusal
+      # behind it would never reach the application and its spans would be
+      # dropped without the sender knowing.
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "processors: \\[memory_limiter, resource/tenant, probabilistic_sampler, ratelimit/tenant, batch\\]"
+
+  - it: splits the tenant rate across collector replicas
+    template: templates/vtraces/collector.yaml
+    release:
+      namespace: tenant-foo
+    set:
+      _namespace:
+        tracingCentral: true
+      tracingCollector:
+        replicas: 3
+    kubernetesProvider:
+      scheme: *scheme
+      objects:
+        - kind: VMAuth
+          apiVersion: operator.victoriametrics.com/v1beta1
+          metadata:
+            name: traces-central
+            namespace: tenant-root
+            annotations:
+              tracing.cozystack.io/tenant-bytes-per-second: "100000"
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "(?m)^    rate: 33334$"
+
+  # A request larger than burst can never pass the limiter, so burst never
+  # drops below what one second of the rate needs.
+  - it: raises burst to one second of a rate above 64 MiB per second
+    template: templates/vtraces/collector.yaml
+    release:
+      namespace: tenant-foo
+    set:
+      _namespace:
+        tracingCentral: true
+      tracingCollector:
+        replicas: 1
+    kubernetesProvider:
+      scheme: *scheme
+      objects:
+        - kind: VMAuth
+          apiVersion: operator.victoriametrics.com/v1beta1
+          metadata:
+            name: traces-central
+            namespace: tenant-root
+            annotations:
+              tracing.cozystack.io/tenant-bytes-per-second: "200000000"
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "(?m)^    rate: 200000000\\n    burst: 200000000$"
+
+  # Offline renders see no vmauth, and an annotation that is not a positive
+  # number gives no rate; both fall back to the rate of a default 10Gi store
+  # rather than to no limit.
+  - it: falls back to the default store's rate when tenant-root publishes none
+    template: templates/vtraces/collector.yaml
+    release:
+      namespace: tenant-foo
+    set:
+      _namespace:
+        tracingCentral: true
+      tracingCollector:
+        replicas: 1
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "(?m)^    rate: 99420$"
+
+  - it: falls back to the default store's rate on an annotation that is not a number
+    template: templates/vtraces/collector.yaml
+    release:
+      namespace: tenant-foo
+    set:
+      _namespace:
+        tracingCentral: true
+      tracingCollector:
+        replicas: 1
+    kubernetesProvider:
+      scheme: *scheme
+      objects:
+        - kind: VMAuth
+          apiVersion: operator.victoriametrics.com/v1beta1
+          metadata:
+            name: traces-central
+            namespace: tenant-root
+            annotations:
+              tracing.cozystack.io/tenant-bytes-per-second: "fast"
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "(?m)^    rate: 99420$"
+
+  - it: sets no rate limit on a collector writing to its own store
+    template: templates/vtraces/collector.yaml
+    release:
+      namespace: tenant-foo
+    set:
+      tracingStorages:
+        - name: generic
+          mode: cluster
+          storage: 10Gi
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: "ratelimit"

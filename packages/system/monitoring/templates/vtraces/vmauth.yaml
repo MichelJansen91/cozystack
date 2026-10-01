@@ -38,6 +38,9 @@ apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMAuth
 metadata:
   name: traces-central
+  annotations:
+    # Read by every central tenant's collector, which holds the tenant to it.
+    tracing.cozystack.io/tenant-bytes-per-second: {{ include "monitoring.tracingCentralTenantRate" . | quote }}
 spec:
   managedMetadata:
     labels:
