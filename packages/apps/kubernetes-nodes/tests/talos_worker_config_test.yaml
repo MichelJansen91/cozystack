@@ -32,6 +32,115 @@ set:
     memory: 16Gi
 
 tests:
+  - it: leaves explicit empty taints out of the machine configuration
+    set:
+      taints: []
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].command[2]
+          pattern: registerWithTaints
+
+  - it: rejects duplicate taint key and effect pairs
+    set:
+      taints:
+        - key: dedicated
+          value: ci
+          effect: NoSchedule
+        - key: dedicated
+          value: other
+          effect: NoSchedule
+    asserts:
+      - failedTemplate:
+          errorMessage: "taints: duplicate key/effect pair"
+
+  - it: rejects invalid taint keys
+    set:
+      taints:
+        - key: invalid/key/again
+          effect: NoSchedule
+    asserts:
+      - failedTemplate: {}
+
+  - it: rejects shell expansion in taint values
+    set:
+      taints:
+        - key: dedicated
+          value: '$(id)'
+          effect: NoSchedule
+    asserts:
+      - failedTemplate: {}
+
+  - it: rejects unsupported taint effects
+    set:
+      taints:
+        - key: dedicated
+          effect: Never
+    asserts:
+      - failedTemplate: {}
+
+  - it: rejects unknown taint fields
+    set:
+      taints:
+        - key: dedicated
+          effect: NoSchedule
+          extra: unexpected
+    asserts:
+      - failedTemplate:
+          errorMessage: "taints: only key, value and effect are supported"
+
+  - it: preserves the proxmox cloud provider when registering tainted workers
+    set:
+      substrate: proxmox
+      proxmox:
+        templateTags: [capmox-template, talos]
+        network:
+          bridge: vmbr0
+        dnsServers: ["8.8.8.8"]
+      taints:
+        - key: dedicated
+          value: ci
+          effect: NoSchedule
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].command[2]
+          pattern: 'extraArgs:\s*\n\s+cloud-provider: external'
+      - matchRegex:
+          path: spec.template.spec.containers[0].command[2]
+          pattern: 'registerWithTaints:'
+
+  - it: registers workers with the configured scheduling taint
+    set:
+      taints:
+        - key: node-role.kubernetes.io/ci-execution
+          effect: NoSchedule
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].command[2]
+          pattern: 'registerWithTaints:\s*\n\s+- effect: NoSchedule\s*\n\s+key: node-role.kubernetes.io/ci-execution'
+
+  - it: registers workers with the requested taint before scheduling
+    set:
+      taints:
+        - key: dedicated.example.com/workload
+          value: gpu
+          effect: NoSchedule
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].command[2]
+          pattern: 'extraConfig:\s*\n\s+registerWithTaints:\s*\n\s+- effect: NoSchedule\s*\n\s+key: dedicated.example.com/workload\s*\n\s+value: gpu'
+
   - it: labels GPU pools with gpu=on
     set:
       gpus:

@@ -41,6 +41,9 @@ type ConfigSpec struct {
 	// List of node roles. Each role `r` labels nodes with `node-role.kubernetes.io/<r>`. Use `[ingress-nginx]` for a pool that hosts the tenant ingress-nginx controller.
 	// +kubebuilder:default:={}
 	Roles []string `json:"roles,omitempty"`
+	// Kubelet registration taints for every worker in this pool. Keys and values must follow Kubernetes label syntax, and each key/effect pair must be unique. Empty leaves existing bootstrap configuration unchanged. Changing this list replaces the content-hashed bootstrap template and rolls the pool; registration does not continuously enforce taints on an already joined node. NoSchedule requires matching workload tolerations but is not a host-security boundary.
+	// +kubebuilder:default:={}
+	Taints []Taint `json:"taints,omitempty"`
 	// Explicit CPU and memory for each worker node, as an alternative to `instanceType` sizing. Optional: when omitted, the node is sized by `instanceType`. When both `cpu` and `memory` are set, they take precedence and `instanceType` is ignored (the instancetype is omitted from the VM, since KubeVirt cannot override an instancetype's CPU/memory). Set both `cpu` and `memory` together or neither; setting only one is rejected at render time.
 	// +kubebuilder:default:={}
 	Resources Resources `json:"resources,omitempty"`
@@ -168,6 +171,20 @@ type Resources struct {
 	Memory resource.Quantity `json:"memory,omitempty"`
 }
 
+type Taint struct {
+	// Scheduling or eviction effect.
+	Effect TaintEffect `json:"effect"`
+	// Kubernetes qualified name identifying the taint.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=317
+	// +kubebuilder:validation:Pattern="^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+	Key string `json:"key"`
+	// Kubernetes label value; empty when omitted.
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern="^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$"
+	Value string `json:"value,omitempty"`
+}
+
 type Talos struct {
 	// Complete PEM certificate block(s) CDI must trust when importing this pool's worker OS disk image over HTTPS — the no-osImage default and `osImage.factory` path. Empty by default, so the importer uses only its system trust store, which is what the public factory needs. Set this when the factory in use (`imageFactoryURL` or `osImage.factory.imageFactoryURL`) is a self-hosted factory or mirror served by an internal CA, which the importer otherwise rejects with `x509: certificate signed by unknown authority`. The chart renders it into a ConfigMap in the release namespace — CDI requires certConfigMap to sit alongside the DataVolume — and references that from the worker DataVolume's `source.http.certConfigMap`; CDI appends it to the system pool rather than replacing it, so a publicly-trusted endpoint verifies either way. A pool on `osImage.builtin` clones a golden image and builds no HTTP source, so this field has no effect there.
 	// +kubebuilder:default:=""
@@ -211,6 +228,9 @@ type WorkerImageFactory struct {
 	// Talos version. Defaults to `talos.version`.
 	Version string `json:"version,omitempty"`
 }
+
+// +kubebuilder:validation:Enum="NoSchedule";"PreferNoSchedule";"NoExecute"
+type TaintEffect string
 
 // +kubebuilder:validation:Enum="v1.35";"v1.34";"v1.33";"v1.32";"v1.31"
 type Version string

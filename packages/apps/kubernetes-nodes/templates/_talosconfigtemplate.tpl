@@ -42,6 +42,7 @@
 {{- define "kubernetes.talosConfigTemplateSpec" -}}
 {{- $root := .root }}
 {{- $group := .group }}
+{{- $registrationTaints := include "kubernetes-nodes.registrationTaints" $group.taints }}
 {{- $kubeletVersion := include "kubernetes.versionMap" $root | trim }}
 {{- /* Resolve this pool's worker image (schematicID, version) from .Values.osImage
        — the same selection templates/nodegroup.yaml uses for the boot disk — so the
@@ -226,6 +227,10 @@ spec:
               cloud-provider: external
             {{- end }}
             extraConfig:
+              {{- if $registrationTaints }}
+              registerWithTaints:
+                {{- $registrationTaints | replace "\\" "\\\\" | replace "$" "\\$" | replace "`" "\\`" | nindent 16 }}
+              {{- end }}
               systemReserved:
                 cpu: "{{ $systemReservedCpu }}"
                 memory: "{{ $systemReservedMemory }}"

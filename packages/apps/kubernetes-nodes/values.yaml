@@ -43,6 +43,21 @@ storageClass: replicated
 ## @field {string} name - Module name as `modprobe` takes it, e.g. `nvidia_uvm`.
 ## @field {[]string} [parameters] - Module parameters, each as a bare `key=value` string.
 
+## @enum {string} TaintEffect
+## @value NoSchedule
+## @value PreferNoSchedule
+## @value NoExecute
+
+## @typedef {struct} Taint - Taint applied by the kubelet on initial worker registration.
+## @field {string} key - Kubernetes qualified name identifying the taint.
+## @minLength 1
+## @maxLength 317
+## @pattern ^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$
+## @field {string} [value] - Kubernetes label value; empty when omitted.
+## @maxLength 63
+## @pattern ^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$
+## @field {TaintEffect} effect - Scheduling or eviction effect.
+
 ## @typedef {struct} Kubelet - Kubelet resource reservations for worker nodes.
 ## @field {string} [systemReservedMemory] - Memory reserved for host OS. Auto-computed from instanceType if empty.
 ## @field {string} [kubeReservedMemory] - Memory reserved for kubelet and container runtime. Auto-computed from instanceType if empty.
@@ -66,6 +81,9 @@ diskSize: 20Gi
 
 ## @param {[]string} roles - List of node roles. Each role `r` labels nodes with `node-role.kubernetes.io/<r>`. Use `[ingress-nginx]` for a pool that hosts the tenant ingress-nginx controller.
 roles: []
+
+## @param {[]Taint} taints - Kubelet registration taints for every worker in this pool. Keys and values must follow Kubernetes label syntax, and each key/effect pair must be unique. Empty leaves existing bootstrap configuration unchanged. Changing this list replaces the content-hashed bootstrap template and rolls the pool; registration does not continuously enforce taints on an already joined node. NoSchedule requires matching workload tolerations but is not a host-security boundary.
+taints: []
 
 ## @param {Resources} [resources] - Explicit CPU and memory for each worker node, as an alternative to `instanceType` sizing. Optional: when omitted, the node is sized by `instanceType`. When both `cpu` and `memory` are set, they take precedence and `instanceType` is ignored (the instancetype is omitted from the VM, since KubeVirt cannot override an instancetype's CPU/memory). Set both `cpu` and `memory` together or neither; setting only one is rejected at render time.
 resources: {}

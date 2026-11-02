@@ -609,6 +609,7 @@ the two.
       "storageClass" .Values.storageClass
       "osImage" .Values.osImage
       "roles" .Values.roles
+      "taints" .Values.taints
       "resources" .Values.resources
       "gpus" .Values.gpus
       "kubelet" .Values.kubelet
@@ -618,4 +619,41 @@ the two.
       "kernelModules" .Values.kernelModules
       "proxmox" .Values.proxmox
     | toYaml -}}
+{{- end -}}
+
+{{- define "kubernetes-nodes.registrationTaints" -}}
+{{- $taints := . | default list -}}
+{{- $seen := dict -}}
+{{- $keyPattern := "^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$" -}}
+{{- range $taint := $taints -}}
+{{- range $field := keys $taint -}}
+{{- if not (has $field (list "key" "value" "effect")) -}}
+{{- fail "taints: only key, value and effect are supported" -}}
+{{- end -}}
+{{- end -}}
+{{- $key := get $taint "key" -}}
+{{- if or (not (kindIs "string" $key)) (not (regexMatch $keyPattern $key)) -}}
+{{- fail "taints: key must be a Kubernetes qualified name" -}}
+{{- end -}}
+{{- $parts := splitList "/" $key -}}
+{{- if and (eq (len $parts) 2) (gt (len (first $parts)) 253) -}}
+{{- fail "taints: key prefix must not exceed 253 characters" -}}
+{{- end -}}
+{{- $value := get $taint "value" -}}
+{{- if or (not (kindIs "string" $value)) (not (regexMatch "^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$" $value)) -}}
+{{- fail "taints: value must be a Kubernetes label value" -}}
+{{- end -}}
+{{- $effect := get $taint "effect" -}}
+{{- if not (has $effect (list "NoSchedule" "PreferNoSchedule" "NoExecute")) -}}
+{{- fail "taints: effect must be NoSchedule, PreferNoSchedule or NoExecute" -}}
+{{- end -}}
+{{- $identity := printf "%s|%s" $key $effect -}}
+{{- if hasKey $seen $identity -}}
+{{- fail "taints: duplicate key/effect pair" -}}
+{{- end -}}
+{{- $_ := set $seen $identity true -}}
+{{- end -}}
+{{- if $taints -}}
+{{- toYaml $taints -}}
+{{- end -}}
 {{- end -}}
