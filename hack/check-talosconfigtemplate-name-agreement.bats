@@ -167,3 +167,32 @@ assert_agreement() {
   fi
   rm -rf "$TMP"
 }
+
+@test "empty registration taints preserve the existing bootstrap identity" {
+  TMP=$(mktemp -d)
+  render_pool "$TMP/plain.yaml"
+  render_pool "$TMP/r.yaml" --set-json 'taints=[]'
+  assert_agreement "$TMP" "empty taints"
+  [ "$(job_tct_name "$TMP/plain.yaml")" = "$(job_tct_name "$TMP/r.yaml")" ]
+  rm -rf "$TMP"
+}
+
+@test "registration taints rotate matching Job, Role and MachineDeployment references" {
+  TMP=$(mktemp -d)
+  render_pool "$TMP/plain.yaml"
+  plain=$(job_tct_name "$TMP/plain.yaml")
+  render_pool "$TMP/r.yaml" --set 'taints[0].key=dedicated' --set 'taints[0].value=ci' --set 'taints[0].effect=NoSchedule'
+  assert_agreement "$TMP" "registration taints"
+  tainted=$(job_tct_name "$TMP/r.yaml")
+  if [ "$plain" = "$tainted" ]; then
+    echo "FAIL: registration taints did not change the bootstrap identity"
+    false
+  fi
+  render_pool "$TMP/r.yaml" --set 'taints[0].key=dedicated' --set 'taints[0].value=ci' --set 'taints[0].effect=NoExecute'
+  assert_agreement "$TMP" "changed taint effect"
+  if [ "$tainted" = "$(job_tct_name "$TMP/r.yaml")" ]; then
+    echo "FAIL: changing the taint effect did not change the bootstrap identity"
+    false
+  fi
+  rm -rf "$TMP"
+}
